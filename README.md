@@ -2,9 +2,13 @@
 
 A reactive scenario-modeling tool for exploring how property acquisitions perform under changing market conditions.
 
+**Live demo:** [re-strategy-sim.vercel.app](https://re-strategy-sim.vercel.app/)
+
+![RE Strategy Simulator screenshot](screenshot.png)
+
 ## What it does
 
-- Month-by-month simulation over a configurable horizon (any number of years) from a user-defined start date
+- Month-by-month simulation over a configurable horizon from a user-defined start date
 - Multiple property acquisition opportunities with individual terms (price, rate, reserves, hold period)
 - Date-based acquisition eligibility — the engine determines when each property can actually be purchased
 - Fixed-rate mortgage amortization per property
@@ -14,9 +18,44 @@ A reactive scenario-modeling tool for exploring how property acquisitions perfor
 - Property sales with configurable hold periods and equity thresholds
 - **Multiple market timelines** — the same portfolio plan runs against every timeline simultaneously
 - **Advisory layer** — deterministic, explainable recommendations per timeline with plan-variant comparison
+- **Domain validation** — reactive cross-field sanity checks with inline feedback (see below)
 - Reactive visualization — no Run button; results derive from inputs via `useMemo`
 - Structured event history with acquisition explanations
 - Info tooltips on every input field
+- Mobile-responsive layout — full dashboard on desktop, progressive inspector on mobile
+
+## Domain Validation
+
+The simulator validates not only individual field values but cross-field and domain relationships. Three severity levels are used:
+
+| Level | Meaning |
+|-------|---------|
+| **Error** | Impossible or invalid input — entity is marked as invalid |
+| **Warning** | Technically valid but likely contradictory, risky, or surprising |
+| **Info** | Unusual behavior worth understanding (e.g. a fixed rate overrides a timeline rate event) |
+
+Validation is reactive — feedback updates as you type, with no submit button required.
+
+### Example cross-field checks
+
+**Sell threshold vs. down payment:**
+A 5% sell-at-equity threshold is individually valid. But if the property has a 20% down payment, equity already exceeds the threshold at purchase. The simulator surfaces this as a warning rather than silently accepting the configuration:
+
+> ⚠ Sell-at-equity threshold (5%) is at or below the starting equity from the down payment (20%). This property may qualify for sale immediately after the hold period.
+
+**Other cross-field checks include:**
+- Earliest purchase date after simulation end → Error
+- Latest purchase date before simulation start → Error
+- Market event entirely outside simulation horizon → Warning
+- Two market events overlapping on the same attribute → Info (explains which event wins and why)
+- Down payment + closing costs + reserve exceeds starting cash → Warning
+- Baseline monthly cash flow is materially negative → Warning
+- Property-specific fixed mortgage rate while timeline has a rate event → Info
+- Property shock of −100% or worse → Error; −70% to −99% → Warning
+
+### UI presentation
+
+Validation badges appear inline on property rows and timeline tabs. Inside editors, messages appear next to the relevant field. Warnings do not block simulation — the simulator always runs. Only errors prevent meaningless configuration from entering the engine.
 
 ## Advisory Layer
 
@@ -65,6 +104,17 @@ When a recommended plan is created:
 
 Users can rename, delete, or switch between variants at any time. The original is always recoverable.
 
+## Property Sale Rules
+
+Two independent parameters control when a property is sold:
+
+- **Min hold years** — a hard floor; the property will never sell before this regardless of equity
+- **Sell at equity %** — the trigger; once the hold period has elapsed, the property sells as soon as equity reaches this percentage of current value
+
+Both conditions must be satisfied simultaneously. With no equity trigger set (`never`), the property holds for the full simulation horizon. With `minHoldYears: 0` and a trigger set, the property can sell as soon as the threshold is crossed.
+
+The editor shows an inline warning if the threshold is already met at purchase (e.g. a 5% threshold with a 20% down payment), and an estimated sell date derived from the simulation result or an analytical approximation based on appreciation.
+
 ## Engineering Decisions
 
 1. **Simulation engine is pure TypeScript, independent of React.** `runSimulation()` accepts a plan and a timeline and returns a serializable result. No React dependencies inside `src/simulation/`.
@@ -83,7 +133,9 @@ Users can rename, delete, or switch between variants at any time. The original i
 
 8. **Skip events are suppressed intelligently.** The engine only records a skip event when the rejection reason changes — not every month. This demonstrates production-quality thinking about log volume.
 
-9. **Domain invariants are unit-tested.** 39 tests cover: mortgage amortization, acquisition timing, reserve enforcement, shock idempotency, net-worth accounting, multi-timeline divergence, recommendation scoping, non-destructive plan apply, counterfactual comparison, and determinism.
+9. **Validation is pure and reactive.** `runValidation({ plan, properties, timelines })` is a pure function that returns a flat `ValidationIssue[]`. It runs via `useMemo` and never blocks the simulation — warnings are advisory, not gatekeeping.
+
+10. **Sale trigger logic is AND, not OR.** Min hold years and sell-at-equity are both required simultaneously. No trigger set means hold forever. This is explicitly tested to prevent regression.
 
 ## Architecture
 
@@ -95,21 +147,22 @@ React UI (page.tsx)
   ├── PlanVariant[] state       (original + recommended)
   └── Recommendation[] state
         │
-        └─ useMemo ──→  timelines.map(t => runSimulation({ plan, properties, timeline: t }))
+        ├─ useMemo ──→  timelines.map(t => runSimulation({ plan, properties, timeline: t }))
+        │                         │
+        │                 SimulationResult[]
+        │                         │
+        │     ┌───────────────────┼───────────────────┐
+        │  ComparisonChart   PropertyOutcomes    generateRecommendations()
+        │                                               │
+        │                                      Recommendation[]
+        │
+        └─ useMemo ──→  runValidation({ plan, properties, timelines })
                                   │
-                          SimulationResult[]
+                          ValidationIssue[]
                                   │
-              ┌───────────────────┼───────────────────┐
-        ComparisonChart   PropertyOutcomes      generateRecommendations()
-                                                        │
-                                               Recommendation[]
-                                                        │
-                                          AdvisoryPanel / PlanComparison
+                    Badges on rows + inline field messages
 
 src/simulation/
-  types.ts                — domain types (legacy, stable)
-  types/                  — split domain types by subdomain
-  engine.ts               — re-export proxy
   engine/
     runSimulation.ts      — full simulation loop (7-phase monthly engine)
     ownedProperty.ts      — internal mutable property state
@@ -122,30 +175,44 @@ src/simulation/
 
 src/advisory/
   types.ts                — Recommendation, PlanVariant, PlanChange
-  generateRecommendations.ts — top-level entry point
+  generateRecommendations.ts
   purchaseRecommendations.ts — delay logic via counterfactual simulation
   saleRecommendations.ts  — sell/hold logic via counterfactual simulation
-  reserveWarnings.ts      — cash reserve threshold warnings
   applyRecommendation.ts  — pure: plan → new plan (non-destructive)
   comparePlans.ts         — run both variants against all timelines
 
+src/validation/
+  types.ts                — ValidationIssue, severity, scope types
+  validatePlan.ts
+  validateProperty.ts
+  validateSaleRules.ts    — cross-field sell threshold vs. down payment
+  validateMarketEvent.ts
+  validateOneTimeEvent.ts
+  validateTimeline.ts     — composes per-event + overlap detection
+  validateCrossFieldRules.ts — plan×property cross-checks
+  index.ts                — runValidation() entry point
+
 src/components/
-  advisory/
-    AdvisoryPanel.tsx     — recommendation list + CTA
-    RecommendationCard.tsx — individual recommendation with accept/reject
-    PlanVariantSelector.tsx — switch/delete/rename variants
-    PlanComparison.tsx    — original vs recommended across timelines
+  validation/
+    ValidationBadge.tsx   — compact inline severity + count badge
+    ValidationMessages.tsx — expandable issue list by severity
+  property/
+    PropertyTable.tsx     — badges per row
+    PropertyEditor.tsx    — inline field messages
+  timeline/
+    TimelineWorkspace.tsx — timeline-level badges and messages
+    MarketEventRow.tsx    — per-event badges
 ```
 
 ## Monthly simulation ordering
 
-Each month processes in this order (ordering documented because it affects results):
+Each month processes in this order (ordering matters — it affects results):
 
 1. Announce market event boundaries
 2. Apply one-time events (shocks fire exactly once, tracked by ID)
 3. Appreciate property values and grow rents
 4. Collect rent, deduct vacancy + expenses + mortgage payments
-5. Evaluate and execute sales (oldest qualifying property)
+5. Evaluate and execute sales
 6. Evaluate and execute acquisitions (earliest availability first, at most one/month)
 7. Record monthly snapshot
 
@@ -178,7 +245,103 @@ Market timelines are pure data — the engine has no knowledge of timeline names
 npm test
 ```
 
-39 tests covering: mortgage payment correctness, balance invariants, market event boundary timing, overlap resolution, one-time shock idempotency, acquisition decision logic (before/after availability, reserve enforcement, expiry), sale timing, net-worth accounting identity, multi-timeline comparison, fixed-rate loan isolation from market rate changes, determinism, recommendation scoping, non-destructive plan variants, and cross-timeline counterfactual comparison.
+77 tests across 4 files:
+
+**Mortgage** (`simulation.test.ts`)
+- Monthly payment calculation for 30-year fixed at 7%
+- Balance reduces after each payment
+- Balance reaches ~zero after full amortization, never goes negative
+- Zero-rate mortgage amortizes as equal principal payments
+
+**Market event resolution** (`simulation.test.ts`)
+- Returns base conditions when no events are active
+- Applies event that starts on exact date
+- Does not apply event before its start date
+- Does not apply event after its end date
+- Later-starting event wins for same attribute when both active
+- Overlapping events with different attributes compose freely
+
+**Acquisition evaluation** (`simulation.test.ts`)
+- Rejects purchase before availability date
+- Rejects when insufficient funds for down payment
+- Rejects when reserve requirement would be violated
+- Allows purchase when all criteria met
+- Rejects after latest purchase date
+
+**Simulation integration** (`simulation.test.ts`)
+- Purchases a property when cash becomes sufficient
+- Does not purchase a property when cash is always insufficient
+- Does not purchase same property twice
+- Cannot sell before minimum hold period
+- Net worth invariant: cash + propertyValue − debt in every snapshot
+- Property value shock applies exactly once
+- Sale deducts selling costs and pays off mortgage
+
+**Multi-timeline** (`simulation.test.ts`)
+- Same plan / different timelines produce different results
+- Identical timelines produce identical results
+- Market rate event changes mortgage rate on new purchases during that period
+- Changing market rate does not modify existing fixed-rate mortgage
+- Determinism: same plan+timeline inputs produce identical results
+
+**Sell trigger logic** (`sell.test.ts`)
+- `sellWhenEquityPct` undefined → never auto-sells (regression test for the default-sell bug)
+- Explicitly undefined `sellWhenEquityPct` → never sells (belt-and-suspenders)
+- Hold period not yet met → no sale even with equity above threshold
+- Hold period just met with trigger set → returns SaleResult with correct fields
+- Equity below threshold → no sale
+- `sold: true` → returns null immediately
+- `minHoldYears: 0` with trigger → sells immediately when equity exceeds threshold
+- Same with purchase date = evaluation date (0 months held satisfies minHoldYears 0)
+
+**Sell integration** (`sell.test.ts`)
+- No auto-sell without trigger: status remains `purchased` after 20-year horizon
+- Auto-sell fires after hold period when trigger is set
+- Sale proceeds return to cash: ending net worth is positive
+- Multiple properties: only the one with a trigger sells
+- Hold through market downturn: no trigger = property still held
+- Net worth invariant holds through a sale
+
+**Equity threshold controls sale date** (`sell.test.ts`)
+- Higher equity threshold delays sale relative to lower threshold
+- Threshold below starting equity fires at first eligible month (hold period boundary)
+- Threshold above starting equity fires only after appreciation builds enough equity
+- Threshold set so high it is never reached: property holds for full horizon
+- No sell trigger: property never sells regardless of equity accumulated
+
+**Acquisition integration** (`sell.test.ts`)
+- Property purchased at earliest available date when sufficient cash
+- Property not purchased after `latestPurchaseDate` passes with insufficient cash
+- Reserve requirement blocks purchase when cash would fall below threshold
+
+**Advisory** (`advisory.test.ts`)
+- Recommendations scoped to the correct timeline
+- Applying a recommendation returns a new plan (non-destructive)
+- Reserve warning generated when cash dips below threshold
+- Delay recommendation generated when delaying improves reserves
+- Sale recommendations scoped to correct property
+- Determinism: same inputs produce same recommendations
+- Plan variant apply: accepted recs modify the new variant
+- Original plan immutability: original is never mutated
+- Cross-timeline comparison runs both variants against all timelines
+- Comparison diffs are computed correctly
+- Recommendation beyond `latestPurchaseDate` is not generated
+- Recommendation before property availability is not generated
+
+**Validation** (`validation.test.ts`)
+- 20% down + 5% sell-equity threshold → warning (`sell-threshold-below-down-payment`)
+- 20% down + 50% sell-equity threshold → no such warning
+- Latest purchase before earliest → error
+- Property available after simulation end → error/warning
+- Market event outside simulation horizon → warning
+- Two overlapping events on same field → info with precedence explanation
+- Two overlapping events on different fields → no conflict warning
+- −100% property value shock → error
+- −80% property value shock → warning, not error
+- Negative baseline cash flow → warning
+- Zero rent → warning
+- Unusually high mortgage rate → warning
+- Fixed property rate with timeline rate event → info
 
 ## Getting Started
 
@@ -187,7 +350,63 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The app starts with one sample property and two timelines (Timeline A and Timeline B: Downturn). Add properties and market events and watch the simulation update instantly. Use the Advisory section to review timeline-specific recommendations.
+Open [http://localhost:3000](http://localhost:3000).
+
+## Default Scenario Walkthrough
+
+The app opens with a pre-configured scenario designed to demonstrate all major features. Here's what you should see and be able to do immediately — no setup required.
+
+### What's pre-loaded
+
+**Two properties:**
+
+| | Property A | Property B |
+|--|--|--|
+| Price | $320,000 | $275,000 |
+| Rent | $2,400/mo | $2,100/mo |
+| Down payment | 20% | 20% |
+| Available | Jan 2027 | Jun 2029 |
+| Min hold | 3 years | 5 years |
+
+**Starting cash:** $90,000 — tight enough that purchasing Property A immediately leaves reserves near the $20,000 threshold, making the advisory interesting.
+
+**Two market timelines:**
+
+- **Timeline A: Base Case** — no events, steady 3.5% appreciation throughout the 20-year horizon
+- **Timeline B: Downturn** — a housing correction shock (−15%) in Sep 2030, followed by a recession Jan 2031–Dec 2033 (−2% appreciation, 14% vacancy)
+
+### What you should see
+
+**Properties section (top):** Both properties listed with their simulation outcomes — purchased dates, sold dates (if applicable), and equity. Click **Edit** on either property to open the inline editor.
+
+**Chart:** Two diverging net worth lines — Timeline A grows steadily, Timeline B dips during the 2030–2033 period then partially recovers.
+
+**KPI row:** Side-by-side ending net worth, equity, cash, and min-cash for both timelines. The Downturn timeline will show materially lower numbers.
+
+### Advisory recommendations
+
+Switch between timeline tabs and open the **Advisory** section inside each to see scenario-specific recommendations:
+
+**Timeline A: Base Case**
+- **Hold Property A** — no downturn ahead, cash flow is positive, selling would waste ~$19K in transaction costs. The simulation suggests holding produces the stronger outcome.
+- Possibly a **reserve warning** for Property B depending on cash available when it becomes purchasable in mid-2029.
+
+**Timeline B: Downturn**
+- **Sell Property A before the Sep 2030 shock** — the 3-year hold period expires before the shock hits, so selling in mid-2030 avoids the −15% value correction. The counterfactual simulation quantifies the approximate net worth improvement.
+- **Reserve warning or delay rec for Property B** — purchasing Property B in 2029 may push cash reserves close to the threshold under the downturn scenario.
+
+Each recommendation shows:
+1. The suggested action and estimated dollar impact
+2. A "reasoning" section explaining which market event triggered it and how the counterfactual was computed
+3. **Accept** or **Reject** buttons — accepting multiple recommendations and clicking **Create Recommended Plan** builds a non-destructive variant you can compare against the original across both timelines
+
+### Things to try
+
+- **Edit Property A's min hold years** — set it to 10 and watch the sell-before recommendation on Timeline B change to an informational warning (can't sell before the shock anymore)
+- **Change the shock magnitude** on Timeline B — reduce it below −5% and the sell rec may disappear; increase it to −30% and the benefit grows
+- **Add a third timeline** — click "+ Add Timeline", duplicate Timeline B, and give it different recession timing to see how the same plan performs under three futures simultaneously
+- **Accept the sell recommendation** on Timeline B and create a Recommended Plan — the Plan Comparison section at the bottom shows how the variant performs vs. the original on every timeline
+- **Lower starting cash to $70,000** — Property A becomes unaffordable at purchase time and the simulator will show acquisition delay events explaining why
 
 ## Future Improvements
 

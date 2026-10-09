@@ -1,8 +1,8 @@
-// Minimal ID generator — crypto.randomUUID when available, fallback otherwise.
-// Used only for client-side UI entity IDs; not security-critical.
+let counter = 0;
+
+// Generates a short unique ID. Counter-based so it's stable during SSR prerender
+// (no Math.random / Date.now at call time, which Next.js 16 flags as unstable values).
 export function nanoid(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  counter += 1;
+  return `id-${counter}-${(counter * 2654435761) >>> 0}`;
 }

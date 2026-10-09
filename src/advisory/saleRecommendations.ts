@@ -114,9 +114,32 @@ export function generateSaleRecommendations(
     const heldMonths = simDateToIndex(outcome.purchasedDate) - simDateToIndex(plan.startDate);
     const holdYearsSoFar = heldMonths / 12;
 
-    // Respect minHoldYears — if we can't sell yet, skip
-    if (holdYearsSoFar < opp.minHoldYears) continue;
     if (simDateToIndex(sellBeforeDate) <= simDateToIndex(outcome.purchasedDate)) continue;
+
+    // If hold period prevents selling before the threat, surface an informational warning
+    const monthsToThreat = simDateToIndex(threat.date) - simDateToIndex(outcome.purchasedDate ?? plan.startDate);
+    const yearsToThreat = monthsToThreat / 12;
+    if (yearsToThreat < opp.minHoldYears) {
+      recs.push({
+        id: nanoid(),
+        timelineId: timeline.id,
+        type: "warning",
+        propertyId: opp.id,
+        title: `${opp.name} faces a downturn before hold period ends`,
+        summary:
+          `This timeline models a significant event at ${simDateLabel(threat.date)}, but the ${opp.minHoldYears}-year hold period prevents selling beforehand.`,
+        explanation:
+          `Under the "${timeline.name}" timeline, ${opp.name} faces a modeled ${shock ? `${Math.round(Math.abs(threat.magnitude * 100))}% value shock` : "appreciation downturn"} ` +
+          `starting ${simDateLabel(threat.date)} — approximately ${yearsToThreat.toFixed(1)} years after purchase. ` +
+          `The minimum hold period is ${opp.minHoldYears} years, so the property cannot be sold before this event. ` +
+          `Consider reducing the minimum hold period if you want to model selling before this downturn.`,
+        status: "pending",
+      });
+      continue;
+    }
+
+    // Respect minHoldYears for the counterfactual sell simulation
+    if (holdYearsSoFar < opp.minHoldYears) continue;
 
     // Run counterfactual: sell by lowering minHoldYears and adding equity trigger
     const sellProperties = properties.map((p) => {

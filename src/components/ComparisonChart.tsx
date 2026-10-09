@@ -59,14 +59,12 @@ export function ComparisonChart({ timelineResults }: Props) {
     });
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <h2 className="text-sm font-semibold text-slate-700 mb-1">
-        Net Worth Comparison Across Timelines
-      </h2>
-      <p className="text-xs text-slate-400 mb-4">
-        Same portfolio plan, different market futures.
-      </p>
-      <ResponsiveContainer width="100%" height={300}>
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-baseline gap-3 mb-3">
+        <h2 className="text-sm font-semibold text-slate-700">Net Worth Across Timelines</h2>
+        <p className="text-xs text-slate-400">Same plan, different market futures.</p>
+      </div>
+      <ResponsiveContainer width="100%" height={340}>
         <LineChart data={data} margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
           <XAxis

@@ -24,12 +24,12 @@ export function evaluateSale(
   const dateIdx = simDateToIndex(date);
   const heldMonths = dateIdx - simDateToIndex(p.purchaseDate);
   const heldYears = heldMonths / 12;
-  if (heldYears < p.minHoldYears || p.minHoldYears === 0) return null;
+  if (heldYears < p.minHoldYears) return null;
 
   const equity = p.currentValue - p.mortgage.balance;
   const equityPct = p.currentValue > 0 ? equity / p.currentValue : 0;
   const shouldSell =
-    p.sellWhenEquityPct !== undefined ? equityPct >= p.sellWhenEquityPct : true;
+    p.sellWhenEquityPct !== undefined ? equityPct >= p.sellWhenEquityPct : false;
 
   if (!shouldSell) return null;
 
