@@ -352,6 +352,86 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## AI Strategy Advisor (optional, local dev only)
+
+The AI Strategy Advisor analyzes the investment plan across every configured market timeline. It is entirely optional — the simulator, advisory rules, and all other features work without it.
+
+The advisor requires a local API key and is not available on the public Vercel demo (keys are never committed or exposed to the browser).
+
+### How it works
+
+The deterministic simulator does all the financial calculations. The LLM:
+- interprets the user's natural-language goal into structured criteria
+- receives simulator-measured results for the current plan and candidate alternatives across every timeline
+- synthesizes tradeoffs and explains recommendations
+- never invents financial figures — all numbers it references come from simulation output
+
+### Setup
+
+1. Copy `.env.example` to `.env.local`:
+
+   ```bash
+   cp .env.example .env.local
+   ```
+
+2. Choose a provider and set its model in `.env.local`:
+
+   ```
+   # OpenAI
+   AI_PROVIDER=openai
+   AI_MODEL=gpt-4o-mini
+   OPENAI_API_KEY=sk-...
+
+   # Anthropic
+   AI_PROVIDER=anthropic
+   AI_MODEL=claude-haiku-4-5-20251001
+   ANTHROPIC_API_KEY=sk-ant-...
+
+   # xAI
+   AI_PROVIDER=xai
+   AI_MODEL=grok-beta
+   XAI_API_KEY=xai-...
+   ```
+
+3. Restart the dev server:
+
+   ```bash
+   npm run dev
+   ```
+
+The **AI Strategy Advisor** panel will appear between the KPI summary and the Market Timelines section. If the key is missing or misconfigured, the panel shows setup instructions and the rest of the app is unaffected.
+
+> `.env.local` is gitignored. Never commit API keys.
+
+### Example goals
+
+The advisor ships with seven saved goals selectable from a dropdown, or you can type any custom goal:
+
+| Goal | What it optimizes for |
+|------|----------------------|
+| **Balanced Resilience** | Strong net worth without over-fitting to the Base Case |
+| **Protect $25K Cash** | Maximize net worth while keeping ≥ $25,000 in reserves |
+| **Downturn Resilience** | Survival and liquidity in the worst-performing timeline |
+| **Maximum Growth** | Highest long-term net worth, willing to accept leverage |
+| **Acquire All Properties** | Buy everything as early as safely possible |
+| **Minimize Debt** | Lower leverage while preserving reasonable growth |
+| **Worst-Case Focus** | Optimize primarily for the weakest timeline |
+
+Custom goal examples:
+- *"I want to retire the mortgages as quickly as possible while still buying Property C."*
+- *"I do not want cash reserves to fall below $40,000."*
+- *"Find the smallest difference between my best and worst timeline outcomes."*
+
+### Suggested demo flow
+
+1. Use the default portfolio (two properties, two timelines).
+2. Add a third timeline — duplicate **Timeline B: Downturn** and adjust the recession dates.
+3. Select **Protect $25K Cash** from the saved goals dropdown.
+4. Click **Analyze Across 3 Timelines**.
+5. Review the interpreted goal and cross-timeline recommendation table.
+6. Accept a recommendation and click **Create AI Recommended Plan**.
+7. Compare Original vs. AI Recommended Plan across all timelines in the Plan Comparison section.
+
 ## Default Scenario Walkthrough
 
 The app opens with a pre-configured scenario designed to demonstrate all major features. Here's what you should see and be able to do immediately — no setup required.

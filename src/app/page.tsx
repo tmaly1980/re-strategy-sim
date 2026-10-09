@@ -24,6 +24,8 @@ import { applyRecommendations } from "@/advisory/applyRecommendation";
 import { comparePlans } from "@/advisory/comparePlans";
 import type { Recommendation, PlanVariant } from "@/advisory/types";
 import { runValidation } from "@/validation";
+import { GlobalAiAdvisor } from "@/components/advisory/GlobalAiAdvisor";
+import type { AiRecommendation } from "@/advisory/goals/types";
 
 // ─── Default state ────────────────────────────────────────────────────────────
 
@@ -227,6 +229,43 @@ export default function Home() {
     setPlanVariants((vs) => vs.map((v) => (v.id === id ? { ...v, name } : v)));
   }
 
+  // Apply AI recommendations as a new plan variant
+  function applyAiRecommendations(recs: AiRecommendation[], goalSummary: string) {
+    // Convert AI recommendations to the existing Recommendation shape for applyRecommendations
+    const convertedRecs: Recommendation[] = recs
+      .filter((r) => r.proposedChange.kind !== "none" && r.proposedChange.propertyId)
+      .filter((r) => originalVariant.properties.some((p) => p.id === r.proposedChange.propertyId))
+      .map((r) => ({
+        id: r.id,
+        timelineId: "",
+        type: "delay" as const,
+        title: r.title,
+        summary: r.rationale,
+        explanation: r.rationale,
+        status: "accepted" as const,
+        proposedChange: r.proposedChange,
+      }));
+
+    if (convertedRecs.length === 0) return;
+
+    const { plan: newPlan, properties: newProps } = applyRecommendations(
+      originalVariant.plan,
+      originalVariant.properties,
+      convertedRecs
+    );
+    const variant: PlanVariant = {
+      id: nanoid(),
+      name: `AI — ${goalSummary.slice(0, 40)}`,
+      plan: newPlan,
+      properties: newProps,
+      sourcePlanId: ORIGINAL_VARIANT_ID,
+      appliedRecommendationIds: convertedRecs.map((r) => r.id),
+      isOriginal: false,
+    };
+    setPlanVariants((vs) => [...vs.filter((v) => v.isOriginal), variant]);
+    setSelectedVariantId(variant.id);
+  }
+
   const kpiItems = timelineResults.map(({ timeline, result }, i) => ({
     name: timeline.name,
     result,
@@ -290,6 +329,15 @@ export default function Home() {
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <KpiRow results={kpiItems} />
         </div>
+
+        {/* ── Global AI Strategy Advisor ── */}
+        <GlobalAiAdvisor
+          timelines={timelines}
+          timelineResults={timelineResults}
+          originalPlan={originalVariant.plan}
+          originalProperties={originalVariant.properties}
+          onApplyRecommendations={applyAiRecommendations}
+        />
 
         {/* ── Market Timelines ── */}
         <section>
